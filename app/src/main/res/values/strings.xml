@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">CompanyFind</string>
+    <string name="header_text">Wyszukiwanie danych firmy, wprowadź nip</string>
+    <string name="nip_hint">Wprowadź NIP</string>
+    <string name="search_button_text">Wyszukaj firmę</string>
+    <string name="company_details_title">Szczegóły firmy</string>
+    <string name="error_invalid_nip">Nieprawidłowy numer NIP</string>
+    <string name="error_network">Błąd połączenia sieciowego</string>
+    <string name="loading">Wyszukiwanie...</string>
 </resources>
