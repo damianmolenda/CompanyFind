@@ -16,6 +16,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        jcenter() // Deprecated but still needed for some legacy libraries like ksoap2-android
         maven { url 'https://jitpack.io' }
     }
 }
