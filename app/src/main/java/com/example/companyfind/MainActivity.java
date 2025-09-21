@@ -13,6 +13,7 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import com.example.companyfind.gus.CompanyParser;
 import com.example.companyfind.gus.RetrofitClient;
 import com.example.companyfind.gus.SessionStore;
 import com.example.companyfind.gus.SidParser;
@@ -20,9 +21,11 @@ import com.example.companyfind.gus.SoapApi;
 import com.example.companyfind.gus.SoapBodies;
 import com.example.companyfind.gus.SoapRequest;
 import com.example.companyfind.gus.SoapResponse;
+import com.example.companyfind.model.Company;
 import com.google.android.material.textfield.TextInputEditText;
 
 import okhttp3.ResponseBody;
+import okhttp3.RequestBody;
 import retrofit2.Call;
 
 public class MainActivity extends AppCompatActivity {
@@ -97,54 +100,131 @@ public class MainActivity extends AppCompatActivity {
                 SessionStore.setSid(sid);
 
                 runOnUiThread(() -> {
-                    resultTextView.setText("Zalogowano pomyślnie. Wyszukiwanie firmy...");
+                    resultTextView.setText("Zalogowano pomyślnie. SID: " + sid + "\nWyszukiwanie firmy...");
                 });
 
-                // Teraz wyszukaj firmę po NIP
-                ResponseBody searchBody = api.daneSzukajPodmioty(SoapBodies.daneSzukajPodmiotyEnvelope(nip))
-                        .execute()
-                        .body();
+                // Dodatkowe sprawdzenie - czy SID jest prawidłowo zapisany
+                String storedSid = SessionStore.getSid();
+                System.out.println("Stored SID after login: " + storedSid);
+                System.out.println("Original SID: " + sid);
+                System.out.println("SIDs match: " + sid.equals(storedSid));
 
-                String searchXml = searchBody != null ? searchBody.string() : "";
+                // Teraz wyszukaj firmę po NIP - przekaż SID jako nagłówek
+                System.out.println("Sending search request with SID: " + sid);
+                System.out.println("SessionStore SID: " + SessionStore.getSid());
+
+                // Utwórz SOAP envelope i wyloguj jego zawartość
+                RequestBody soapEnvelope = SoapBodies.daneSzukajPodmiotyEnvelope(nip);
+                System.out.println("SOAP Envelope created successfully");
+
+                // Dodaj szczegółowe logowanie żądania
+                System.out.println("=== SENDING SOAP REQUEST ===");
+                System.out.println("NIP: " + nip);
+                System.out.println("SID Header: " + sid);
+
+                // Wyślij żądanie HTTP z prawidłowymi nagłówkami
+                okhttp3.OkHttpClient httpClient = new okhttp3.OkHttpClient();
+                okhttp3.Request httpRequest = new okhttp3.Request.Builder()
+                        .url("https://wyszukiwarkaregontest.stat.gov.pl/wsBIR/UslugaBIRzewnPubl.svc")
+                        .post(soapEnvelope)
+                        .addHeader("Content-Type", "application/soap+xml; charset=utf-8")
+                        .addHeader("SOAPAction", "\"http://CIS/BIR/PUBL/2014/07/IUslugaBIRzewnPubl/DaneSzukajPodmioty\"")
+                        .addHeader("sid", sid)
+                        .addHeader("User-Agent", "CompanyFind/1.0")
+                        .addHeader("Accept", "*/*")
+                        .build();
+
+                System.out.println("HTTP Headers:");
+                System.out.println("Content-Type: application/soap+xml; charset=utf-8");
+                System.out.println("SOAPAction: \"http://CIS/BIR/PUBL/2014/07/IUslugaBIRzewnPubl/DaneSzukajPodmioty\"");
+                System.out.println("sid: " + sid);
+
+                okhttp3.Response httpResponse = httpClient.newCall(httpRequest).execute();
+
+                System.out.println("=== RECEIVED RESPONSE ===");
+
+                String searchXml = "";
+                String errorDetails = "";
+
+                if (httpResponse.isSuccessful() && httpResponse.body() != null) {
+                    searchXml = httpResponse.body().string();
+                } else {
+                    errorDetails = "HTTP Error: " + httpResponse.code();
+                    System.out.println("HTTP Error: " + httpResponse.code());
+                    if (httpResponse.body() != null) {
+                        String errorBody = httpResponse.body().string();
+                        errorDetails += "\nError body: " + errorBody;
+                        System.out.println("Error body: " + errorBody);
+                    }
+                }
+
+                // Logowanie diagnostyczne
+                System.out.println("HTTP Response code: " + httpResponse.code());
+                System.out.println("Response Headers: " + httpResponse.headers());
+                System.out.println("SID used in request: " + sid);
+                System.out.println("Search response length: " + searchXml.length());
+                System.out.println("=== FULL SEARCH RESPONSE ===");
+                System.out.println(searchXml);
+                System.out.println("=== END SEARCH RESPONSE ===");
+
+                httpResponse.close();
+
+                // Utwórz final zmienną dla lambda expression
+                final String finalSearchXml = searchXml;
+                final String finalErrorDetails = errorDetails;
+                final int finalResponseCode = httpResponse.code();
 
                 runOnUiThread(() -> {
-                    if (searchXml.contains("DaneSzukajPodmiotyResult")) {
-                        // Parsuj wyniki i wyświetl dane firmy
-                        displayCompanyInfo(searchXml, nip);
-                    } else {
-                        resultTextView.setText("Nie znaleziono firmy o podanym NIP: " + nip +
-                                "\n\nOdpowiedź serwera:\n" + searchXml);
+                    try {
+                        if (!finalSearchXml.isEmpty()) {
+                            System.out.println("=== PARSING COMPANY DATA ===");
+                            Company company = CompanyParser.parseFirstCompany(finalSearchXml);
+
+                            if (company != null && company.getNip() != null) {
+                                System.out.println("Successfully parsed company:");
+                                System.out.println("Name: " + company.getName());
+                                System.out.println("NIP: " + company.getNip());
+                                System.out.println("REGON: " + company.getRegon());
+                                System.out.println("Address: " + company.getFormattedAddress());
+                                System.out.println("Status: " + company.getStatus());
+
+                                // Znaleziono firmę - przejdź do szczegółów
+                                Intent intent = new Intent(MainActivity.this, CompanyDetailsActivity.class);
+                                intent.putExtra(CompanyDetailsActivity.EXTRA_COMPANY, company);
+                                startActivity(intent);
+
+                                resultTextView.setText("Znaleziono firmę: " + company.getName());
+                            } else {
+                                System.out.println("No company data parsed or missing NIP");
+                                resultTextView.setText("Nie znaleziono firmy o podanym NIP: " + nip +
+                                        "\n\nSprawdź czy NIP jest poprawny lub czy firma jest zarejestrowana w systemie GUS." +
+                                        "\n\nKod HTTP: " + finalResponseCode +
+                                        "\n\nDługość odpowiedzi: " + finalSearchXml.length());
+                            }
+                        } else {
+                            resultTextView.setText("Błąd wyszukiwania firmy o NIP: " + nip +
+                                    "\n\n" + finalErrorDetails +
+                                    "\n\nKod HTTP: " + finalResponseCode +
+                                    "\n\nUpewnij się, że:\n- NIP jest poprawny\n- Masz prawidłowy klucz API\n- SID jest prawidłowo ustawiony");
+                        }
+                    } catch (Exception parseEx) {
+                        System.out.println("Exception during parsing: " + parseEx.getMessage());
+                        parseEx.printStackTrace();
+                        resultTextView.setText("Błąd parsowania odpowiedzi: " + parseEx.getMessage() +
+                                "\n\nSurowa odpowiedź:\n" + finalSearchXml.substring(0, Math.min(500, finalSearchXml.length())));
                     }
+
                     searchButton.setEnabled(true);
                 });
 
             } catch (Exception ex) {
                 runOnUiThread(() -> {
-                    resultTextView.setText("Błąd: " + ex.getMessage());
+                    resultTextView.setText("Błąd połączenia: " + ex.getMessage());
                     searchButton.setEnabled(true);
                 });
             }
         }).start();
     }
 
-    private void displayCompanyInfo(String xml, String nip) {
-        // Prosta ekstrakcja danych z XML - można to ulepszyć używając parsera XML
-        String result = "Wyniki wyszukiwania dla NIP: " + nip + "\n\n";
-
-        if (xml.contains("<")) {
-            // Sprawdź czy są wyniki
-            if (xml.contains("DaneSzukajPodmiotyResult") && xml.length() > 200) {
-                result += "Znaleziono dane firmy!\n";
-                result += "Szczegóły w odpowiedzi XML:\n\n";
-                result += xml.substring(0, Math.min(xml.length(), 500)) + "...";
-            } else {
-                result += "Brak danych dla podanego NIP.";
-            }
-        } else {
-            result += "Otrzymano pustą odpowiedź z serwera.";
-        }
-
-        resultTextView.setText(result);
-    }
 
 }
