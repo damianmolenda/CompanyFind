@@ -17,11 +17,11 @@ public class GusClient {
     }
 
     public static class CompanyData {
-        private String companyName;
-        private String nip;
-        private String regon;
-        private String address;
-        private String status;
+        private final String companyName;
+        private final String nip;
+        private final String regon;
+        private final String address;
+        private final String status;
 
         public CompanyData(String companyName, String nip, String regon, String address, String status) {
             this.companyName = companyName;
